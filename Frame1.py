@@ -17,9 +17,11 @@ import pyWinhook
 import win32con
 import win32api
 import ctypes
+import pyperclip
 
 
-MOUSE_MOVE_INTERVAL_MS = 200  # 录制鼠标轨迹的精度，数值越小越精准，但同时可能产生大量的冗余
+VERSION = '3.2.2'
+
 
 wx.NO_3D = 0
 HOT_KEYS = ['F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12']
@@ -66,7 +68,7 @@ class Frame1(wx.Frame):
         wx.Frame.__init__(self, id=wxID_FRAME1, name='', parent=prnt,
               pos=wx.Point(506, 283), size=wx.Size(366, 201),
               style=wx.STAY_ON_TOP | wx.DEFAULT_FRAME_STYLE,
-              title='Keymouse Go')
+              title='KeymouseGo v%s' % VERSION)
         self.SetClientSize(wx.Size(350, 205))
 
         self.panel1 = wx.Panel(id=wxID_FRAME1PANEL1, name='panel1', parent=self,
@@ -156,6 +158,21 @@ class Frame1(wx.Frame):
         self.choice_stop.Bind(wx.EVT_CHOICE, self.OnChoice_stopChoice,
               id=wxID_FRAME1CHOICE_STOP)
 
+
+        self.label_mouse_interval = wx.StaticText(
+              label='鼠标精度', name='label_mouse_interval',
+              parent=self.panel1, pos=wx.Point(16, 141), size=wx.Size(56, 32),
+              style=0)
+
+        self.mouse_move_interval_ms = wx.SpinCtrl(initial=200, max=999999,
+              min=0, name='mouse_move_interval_ms', parent=self.panel1, pos=wx.Point(79, 141),
+              size=wx.Size(68, 18), style=wx.SP_ARROW_KEYS)
+
+        self.label_mouse_interval_tips = wx.StaticText(
+              label='数值越小鼠标轨迹越精准，为 0 则不记录', name='label_mouse_interval_tips',
+              parent=self.panel1, pos=wx.Point(160, 141), size=wx.Size(150, 50),
+              style=0)
+
         # ===== if use SetProcessDpiAwareness, comment below =====
         # self.label_scale = wx.StaticText(id=wxID_FRAME1STATICTEXT5,
         #       label='屏幕缩放', name='staticText5',
@@ -225,7 +242,10 @@ class Frame1(wx.Frame):
 
             delay = current_ts() - self.ttt
 
-            if message == 'mouse move' and delay < MOUSE_MOVE_INTERVAL_MS:
+            # 录制鼠标轨迹的精度，数值越小越精准，但同时可能产生大量的冗余
+            mouse_move_interval_ms = self.mouse_move_interval_ms.Value or 999999
+            
+            if message == 'mouse move' and delay < mouse_move_interval_ms:
                 return True
 
             self.ttt = current_ts()
@@ -454,8 +474,34 @@ class RunScriptClass(threading.Thread):
 
     @classmethod
     def run_script_once(cls, script_path, thd=None):
-        s = open(script_path, 'r').read()
-        s = json.loads(s.replace('],\n]', ']\n]'))
+        
+        content = ''
+
+        lines = []
+
+        try:
+            lines = open(script_path, 'r', encoding='utf8').readlines()
+        except Exception as e:
+            print(e)
+            try:
+                lines = open(script_path, 'r', encoding='gbk').readlines()
+            except Exception as e:
+                print(e)
+
+        for line in lines:
+            # 去注释
+            if '//' in line:
+                index = line.find('//')
+                line = line[:index]
+            # 去空字符
+            line = line.strip()
+            content += line
+
+        # 去最后一个元素的逗号（如有）
+        content = content.replace('],\n]', ']\n]').replace('],]', ']]')
+        
+        print(content)
+        s = json.loads(content)
         steps = len(s)
 
         sw = win32api.GetSystemMetrics(win32con.SM_CXSCREEN)
@@ -483,12 +529,19 @@ class RunScriptClass(threading.Thread):
             if event_type == 'EM':
                 x, y = action
 
-                # ctypes.windll.user32.SetCursorPos(x, y)
-                # win32api.SetCursorPos([x, y])
+                if action == [-1, -1]:
+                    # 约定 [-1, -1] 表示鼠标保持原位置不动
+                    pass
+                else:
+                    # 挪动鼠标 普通做法
+                    # ctypes.windll.user32.SetCursorPos(x, y)
+                    # or
+                    # win32api.SetCursorPos([x, y])
 
-                nx = int(x * 65535 / sw)
-                ny = int(y * 65535 / sh)
-                win32api.mouse_event(win32con.MOUSEEVENTF_ABSOLUTE|win32con.MOUSEEVENTF_MOVE, nx, ny, 0, 0)
+                    # 更好的兼容 win10 屏幕缩放问题
+                    nx = int(x * 65535 / sw)
+                    ny = int(y * 65535 / sh)
+                    win32api.mouse_event(win32con.MOUSEEVENTF_ABSOLUTE|win32con.MOUSEEVENTF_MOVE, nx, ny, 0, 0)
 
                 if message == 'mouse left down':
                     win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
@@ -555,7 +608,7 @@ class TaskBarIcon(wxTaskBarIcon):
         self.frame.Raise()
 
     def OnAbout(self, event):
-        wx.MessageBox('https://github.com/taojy123/KeymouseGo', 'KeymouseGo v3.0')
+        wx.MessageBox('https://github.com/taojy123/KeymouseGo', 'KeymouseGo v%s' % VERSION)
         event.Skip()
 
     def OnCloseshow(self, event):
